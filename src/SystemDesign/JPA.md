@@ -1,168 +1,211 @@
-1. A course management system based on SpringBoot JPA, React, MySQL, Redis and RabbitMQ, which implements the addition, 
-   deletion, modification and query of courses. The system is divided into three types: students, teachers and 
-   administrators, and meets the following functions:
+1. Warehouse commodity management system based on SpringBoot JPA.
+   The system has commodity management, commodity classification, order management, and order delivery. 
+   The commodities are stored in different warehouses across the country. The country is divided into the north, south, 
+   west, and east regions. There will be several warehouses in each region. Not every warehouse has all the commodities. 
+   Warehouses classify commodities according to type.
 
-   (1) Display the code of the entity layer, Dao layer, Controller layer, Service layer and ServiceImpl layer, and 
-       implement the createItem(), deleteItem(), updateItem(), getAllItem(), getItemById() methods of the physical 
-       examination items.
+2. Design a program to decide which warehouses will ship to customers, ensuring that the number of shipments is small 
+   and the orders can be delivered to customers in a short time.
+(1) If the commodities are in different warehouses and different regions, customers want all commodities to be 
+    delivered at one time instead of several times. Consider retrieving the goods from the nearest warehouse.
+(2) Choose a method to store the relationship between regions, warehouses, and commodities
+(3) Write a program to decide which warehouse to ship from based on the customer's order. The fewer the number of 
+    shipments, the better
+(4) Consider fast delivery of orders
 
-   1. Entity Layer (Course Entity)
+Repository
 ```java
-    @Entity
-    @Table(name = "courses")
-    public class Course {
-        @Id
-        @GeneratedValue(strategy = GenerationType.IDENTITY)
-        private Long id;
-        private String courseName;
-        private String description;
-        private String teacher;
-    
-        // Constructors, Getters, Setters
-        public Course() {}
-        public Course(String courseName, String description, String teacher) {
-            this.courseName = courseName;
-            this.description = description;
-            this.teacher = teacher;
-        }
-        // Getters and Setters
-    }
-```
-   2. DAO Layer (Repository Interface)
-```java
-    @Repository
-    public interface CourseRepository extends JpaRepository<Course, Long> {
-    }
-```
-   3. Service Layer (Service Interface)
-```java
-    public interface CourseService {
-        Course createItem(Course course);
-        void deleteItem(Long id);
-        Course updateItem(Long id, Course course);
-        List<Course> getAllItems();
-        Course getItemById(Long id);
-    }
-```
-   4. ServiceImpl Layer (Service Implementation)
-```java
-    @Service
-    public class CourseServiceImpl implements CourseService {
-    
-        @Autowired
-        private CourseRepository courseRepository;
-    
-        @Override
-        public Course createItem(Course course) {
-            return courseRepository.save(course);
-        }
-    
-        @Override
-        public void deleteItem(Long id) {
-            courseRepository.deleteById(id);
-        }
-    
-        @Override
-        public Course updateItem(Long id, Course course) {
-            Course existingCourse = courseRepository.findById(id)
-                    .orElseThrow(() -> new RuntimeException("Course not found"));
-            existingCourse.setCourseName(course.getCourseName());
-            existingCourse.setDescription(course.getDescription());
-            existingCourse.setTeacher(course.getTeacher());
-            return courseRepository.save(existingCourse);
-        }
-    
-        @Override
-        public List<Course> getAllItems() {
-            return courseRepository.findAll();
-        }
-    
-        @Override
-        @Cacheable(value = "courses", key = "#id")
-        public Course getItemById(Long id) {
-            return courseRepository.findById(id).orElseThrow(() -> new RuntimeException("Course not found"));
-        }
-    }
-```
-   5. Controller Layer
-```java
-    @RestController
-    @RequestMapping("/api/courses")
-    public class CourseController {
-    
-        @Autowired
-        private CourseService courseService;
-    
-        @PostMapping
-        public ResponseEntity<Course> createCourse(@RequestBody Course course) {
-            return new ResponseEntity<>(courseService.createItem(course), HttpStatus.CREATED);
-        }
-    
-        @DeleteMapping("/{id}")
-        public ResponseEntity<Void> deleteCourse(@PathVariable Long id) {
-            courseService.deleteItem(id);
-            return new ResponseEntity<>(HttpStatus.NO_CONTENT);
-        }
-    
-        @PutMapping("/{id}")
-        public ResponseEntity<Course> updateCourse(@PathVariable Long id, @RequestBody Course course) {
-            return new ResponseEntity<>(courseService.updateItem(id, course), HttpStatus.OK);
-        }
-    
-        @GetMapping
-        public ResponseEntity<List<Course>> getAllCourses() {
-            return new ResponseEntity<>(courseService.getAllItems(), HttpStatus.OK);
-        }
-    
-        @GetMapping("/{id}")
-        public ResponseEntity<Course> getCourseById(@PathVariable Long id) {
-            return new ResponseEntity<>(courseService.getItemById(id), HttpStatus.OK);
-        }
-    }
-```
-   (2) Configure the RedisConfig class and add it to the Service layer with annotations to 
-       implement cache query of the project.
+@Repository
+public interface RegionRepository extends JpaRepository<Region, Long> {
+}
 
-   1. Redis Configuration (RedisConfig.java)
-```java
-    @Configuration
-    @EnableCaching
-    public class RedisConfig extends CachingConfigurerSupport {
+@Repository
+public interface WarehouseRepository extends JpaRepository<Warehouse, Long> {
+    // look for warehouse by region
+    List<Warehouse> findByRegion(Region region);
     
-        @Bean
-        public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
-            RedisTemplate<String, Object> template = new RedisTemplate<>();
-            template.setConnectionFactory(connectionFactory);
-            return template;
-        }
-    
-        @Bean
-        public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
-            RedisCacheManager redisCacheManager = RedisCacheManager.builder(connectionFactory).build();
-            return redisCacheManager;
-        }
-    }
+    // look for if out of stock by id of warehouse and product
+    @Query("SELECT w FROM Warehouse w JOIN w.products p WHERE p.id = :productId")
+    List<Warehouse> findWarehousesWithProduct(@Param("productId") Long productId);
+}
+
+@Repository
+public interface ProductRepository extends JpaRepository<Product, Long> {
+}
+
+@Repository
+public interface OrderRepository extends JpaRepository<Order, Long> {
+}
 ```
-   2. ServiceImpl Layer, annotate the caching behavior for query methods.
+Service
 ```java
-    @Service
-    public class CourseServiceImpl implements CourseService {
-    
-        @Autowired
-        private CourseRepository courseRepository;
-    
-        @Cacheable(value = "courses", key = "#id")
-        @Override
-        public Course getItemById(Long id) {
-            return courseRepository.findById(id).orElseThrow(() -> new RuntimeException("Course not found"));
+public interface ShippingService {
+    Warehouse determineWarehouseForOrder(Order order);
+}
+```
+ServiceImpl
+```java
+@Service
+public class ShippingServiceImpl implements ShippingService {
+
+    @Autowired
+    private WarehouseRepository warehouseRepository;
+
+    @Override
+    public Warehouse determineWarehouseForOrder(Order order) {
+        // Simple algorithm: according to customer's location, select closest warehouse and enough products 
+        // as possible as I can
+        Map<Warehouse, Integer> warehouseShippingCount = new HashMap<>();
+
+        for (OrderItem item : order.getItems()) {
+            List<Warehouse> availableWarehouses = warehouseRepository.findWarehousesWithProduct(item.getProduct().getId());
+            
+            Warehouse closestWarehouse = null;
+            double minDistance = Double.MAX_VALUE;
+            
+            for (Warehouse warehouse : availableWarehouses) {
+                double distance = calculateDistance(order.getCustomerLat(), order.getCustomerLng(),
+                                                    warehouse.getLatitude(), warehouse.getLongitude());
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestWarehouse = warehouse;
+                }
+            }
+            
+            warehouseShippingCount.put(closestWarehouse, warehouseShippingCount.getOrDefault(closestWarehouse, 0) + 1);
         }
-    
-        @CacheEvict(value = "courses", key = "#id")
-        @Override
-        public void deleteItem(Long id) {
-            courseRepository.deleteById(id);
-        }
+        
+        // select warehouse including most products
+        return warehouseShippingCount.entrySet().stream()
+            .max(Map.Entry.comparingByValue())
+            .map(Map.Entry::getKey)
+            .orElseThrow(() -> new RuntimeException("No suitable warehouse found for the order"));
     }
+
+    private double calculateDistance(double lat1, double lng1, double lat2, double lng2) {
+        // calculate length from warehouse to customer
+    }
+}
+
 ```
 
-   (4) Display the data transmission to SpringBoot JPA through React.
+Controller
+```java
+@RestController
+@RequestMapping("/orders")
+public class OrderController {
+
+    @Autowired
+    private ShippingService shippingService;
+
+    @PostMapping("/create")
+    public ResponseEntity<String> createOrder(@RequestBody Order order) {
+        Warehouse warehouse = shippingService.determineWarehouseForOrder(order);
+        return ResponseEntity.ok("Order will be shipped from warehouse: " + warehouse.getName());
+    }
+}
+
+```
+Entity:
+```java
+@Entity
+public class Region {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String name;
+}
+@Entity
+public class Warehouse {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String name;
+    // specific warehouse in region
+    @ManyToOne
+    @JoinColumn(name = "region_id")
+    private Region region;
+    private String address;
+    private double latitude;
+    private double longitude;
+}
+@Entity
+public class Product {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String name;
+    private String sku;
+    // specific product in warehouse
+    @ManyToMany
+    @JoinTable(
+        name = "warehouse_product",
+        joinColumns = @JoinColumn(name = "product_id"),
+        inverseJoinColumns = @JoinColumn(name = "warehouse_id")
+    )
+    private List<Warehouse> warehouses;
+}
+@Entity
+public class Order {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private LocalDateTime orderDate;
+    private String customerAddress; 
+    private double customerLat;
+    private double customerLng;
+    @OneToMany
+    private List<OrderItem> items;
+}
+
+@Entity
+public class OrderItem {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    @ManyToOne
+    @JoinColumn(name = "product_id")
+    private Product product;
+    private int quantity;
+}
+```
+DBTable Creation
+```sql
+CREATE TABLE region (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL
+);
+CREATE TABLE warehouse (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    region_id BIGINT,
+    address VARCHAR(255),
+    latitude DOUBLE,
+    longitude DOUBLE,
+    CONSTRAINT fk_region FOREIGN KEY (region_id) REFERENCES region(id)
+);
+CREATE TABLE product (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    sku VARCHAR(100) NOT NULL
+);
+CREATE TABLE warehouse_product (
+    warehouse_id BIGINT,
+    product_id BIGINT,
+    CONSTRAINT fk_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouse(id),
+    CONSTRAINT fk_product FOREIGN KEY (product_id) REFERENCES product(id)
+);
+CREATE TABLE `order` (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_date TIMESTAMP,
+    customer_address VARCHAR(255),
+    customer_lat DOUBLE,
+    customer_lng DOUBLE
+);
+CREATE TABLE order_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    product_id BIGINT,
+    quantity INT,
+    CONSTRAINT fk_product FOREIGN KEY (product_id) REFERENCES product(id)
+);
+```
